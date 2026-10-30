@@ -59,8 +59,12 @@ jobs:
       - name: Comprimir o VST3 (Linux e macOS)
         if: runner.os != 'Windows'
         run: |
+          # Busca o bundle .vst3 onde estea (JUCE pon unha ruta tipo ..._artefacts/Release/VST3/)
+          VST3_DIR=$(find build -type d -name '*.vst3' -prune -print | head -n 1)
+          echo "VST3 atopado: $VST3_DIR"
+          test -n "$VST3_DIR"
           mkdir stage
-          cp -R build/DoctorMigranaReverb_artefacts/VST3/. stage/
+          cp -R "$VST3_DIR" stage/
           cp LICENSE NOTICE.md ASSETS-LICENSE.md README.md stage/
           (cd stage && zip -r -y "../$ZIPNAME" .)
 
@@ -68,8 +72,11 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
+          $d = Get-ChildItem -Path build -Recurse -Directory -Filter *.vst3 | Select-Object -First 1
+          if (-not $d) { throw "Non se atopou ningun bundle .vst3 en build/" }
+          Write-Host "VST3 atopado: $($d.FullName)"
           New-Item -ItemType Directory -Path stage | Out-Null
-          Copy-Item -Recurse "build/DoctorMigranaReverb_artefacts/Release/VST3/*" stage/
+          Copy-Item -Recurse $d.FullName stage/
           Copy-Item LICENSE, NOTICE.md, ASSETS-LICENSE.md, README.md stage/
           Compress-Archive -Path "stage/*" -DestinationPath $env:ZIPNAME
 
