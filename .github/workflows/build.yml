@@ -1,0 +1,104 @@
+name: Build
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      ZIPNAME: Doctor-Migrana-Reverb-${{ matrix.name }}-VST3.zip
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            os: ubuntu-latest
+          - name: Windows
+            os: windows-latest
+          - name: macOS
+            os: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dependencias (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake pkg-config libasound2-dev libjack-jackd2-dev \
+            libfreetype-dev libfontconfig1-dev libx11-dev libxcomposite-dev libxcursor-dev \
+            libxext-dev libxinerama-dev libxrandr-dev libxrender-dev libglu1-mesa-dev mesa-common-dev
+
+      - name: Configurar (Linux e Windows)
+        if: runner.os != 'macOS'
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DMIGRANA_COPY_AFTER_BUILD=OFF
+
+      # O argumento ENTEIRO vai entre aspas: o ";" de "arm64;x86_64" non debe chegar ao shell solto
+      - name: Configurar (macOS, binario universal)
+        if: runner.os == 'macOS'
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DMIGRANA_COPY_AFTER_BUILD=OFF \
+            "-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64" \
+            "-DCMAKE_OSX_DEPLOYMENT_TARGET=10.13"
+
+      - name: Compilar
+        run: cmake --build build --config Release --parallel
+
+      - name: Comprimir o VST3 (Linux e macOS)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir stage
+          cp -R build/DoctorMigranaReverb_artefacts/VST3/. stage/
+          cp LICENSE NOTICE.md ASSETS-LICENSE.md README.md stage/
+          (cd stage && zip -r -y "../$ZIPNAME" .)
+
+      - name: Comprimir o VST3 (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path stage | Out-Null
+          Copy-Item -Recurse "build/DoctorMigranaReverb_artefacts/Release/VST3/*" stage/
+          Copy-Item LICENSE, NOTICE.md, ASSETS-LICENSE.md, README.md stage/
+          Compress-Archive -Path "stage/*" -DestinationPath $env:ZIPNAME
+
+      - name: Gardar o ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ZIPNAME }}
+          path: ${{ env.ZIPNAME }}
+          if-no-files-found: error
+
+  release:
+    name: Publicar Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publicar os ZIP no Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.zip
+          generate_release_notes: true
+          body: |
+            VST3 de **Doctor Migraña – Reverb** para Linux, Windows e macOS (un ZIP por sistema).
+            Código baixo AGPLv3; imaxes e marca segundo `ASSETS-LICENSE.md`.
+            Os binarios non van asinados: en macOS pode facer falta `xattr -dr com.apple.quarantine "Doctor Migrana - Reverb.vst3"`.
